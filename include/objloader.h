@@ -10,16 +10,14 @@ extern "C" {
 #endif
 
 	enum {
-		/** Generates indices and populates \c obj_model_part.indices. */
-		OBJ_INDICES = 0x1,
+		/** Flag to triangulate all shapes. */
+		OBJ_TRIANGULATE = 0x1,
 		/** Merge mesh parts that share the same material, effectively reducing the total number of meshes. */
 		OBJ_OPTIMIZE_MESHES = 0x2,
-		/** Use existing found indices, when ::OBJ_INDICES is specified. */
-		OBJ_JOIN_IDENTICAL_VERTICES = 0x4
 	};
 
 	/** A MTL material definition. */
-	struct mtl_material {
+	struct MtlMaterial {
 		char *name, /**< The name of the material. */
 			*ambientTexture; /**< The path to the diffuse texture. */
 
@@ -31,54 +29,72 @@ extern "C" {
 			opacity; /**< The transparency, declared with *Tr* or *d alpha*, ranges 0-1, where 1 is the default and not transparent at all. */
 	};
 
+	/** The indices to the data of a vertex. */
+	struct ObjVertexIndex {
+		/** The index of the vertex. */
+		int vertexIndex,
+			/** The index of the texture coordinate. */
+			texcoordIndex,
+			/** The index of the normal. */
+			normalIndex;
+	};
+
 	/** A collection of elements in an OBJ model. */
-	struct obj_group {
-		char *name, /**< The name of the group. */
-			 *materialName; /**< The material name for this group, or if @c 0 the same material as the last group. */
-		unsigned int numFaces, /**< This group's number of triangles. */
-					 facesSize, /**< The number of elements in the #faces array. */
-					 facesCapacity, /**< The allocated size of the #faces array. */
-					 *faces, /**< Array of triangles. Interleaved with position, (optional) uv, (optional) normal, ... */
-					 materialIndex; /**< Index of this group's material in obj_model#materials. */
+	struct ObjGroup {
+		/** The name of the group, or @c 0 if it's the same as the last group's. */
+		char *name,
+			 *material; /**< The name of this group's material, or @c 0 if it's the same as the last group's. */
+		/** The next group. */
+		struct ObjGroup *next;
+		/** Array of indices. */
+		struct ObjVertexIndex *indices;
+		/** The number of indices. */
+		unsigned int indicesSize,
+					 /** The capacity of the indices array. */
+					 indicesCapacity,
+					 // TODO rename to indicesPerFace
+					 /** Array of the number of indices per each face. */
+					 *numIndicesFace,
+					 /** The number of faces. */
+					 numFaces,
+					 numIndicesFaceCapacity;
 	};
 
 	/** An OBJ model. */
-	struct obj_model {
-		unsigned int numGroups, /**< The number of groups. */
-					 numMaterialLibraries, /**< The number of material libraries. */
-					 hasUVs, /**< Whether this model has texture coordinates. */
-					 hasNorms, /**< Whether this model has normals. */
-					 vertCount, /**< The number of vertices in #verts. */
+	struct ObjModel {
+		unsigned int // TODO rename these
+					 vertexCount, /**< The number of vertices in #verts. */
 					 uvCount, /**< The number of texture coordinates in #uvs. */
-					 normCount; /**< The number of normals in #norms. */
-		float *verts, /**< Array of the positions. */
-			  *uvs, /**< Array of the texture coordinates. */
-			  *norms; /**< Array of the normals. */
-		struct obj_group *groups; /**< Array of groups. */
-		char **materialLibraries; /**< An array of relative filenames to material libraries. */
+					 normalCount, /**< The number of normals in #norms. */
+					 numMaterialLibraries; /**< The number of material libraries. */
+		float *vertices, /**< Array of positions. */
+			  *texcoords, /**< Array of texture coordinates. */
+			  *normals; /**< Array of normals. */
+		/** The first group in linked list. */
+		struct ObjGroup *firstGroup;
+		/** Array of filenames to material libraries, relative to the OBJ file. */
+		char **materialLibraries;
 	};
 
 	/** Loads an OBJ model.
 		@param data The data of the model file, must be null-terminated
 		@param flags Additional flags use when loading
 		@return The OBJ model */
-	struct obj_model *obj_load_model(const char *data, int flags);
+	struct ObjModel *objLoadModel(const char *data, int flags);
 
 	/** Destroys an OBJ model.
 		@param model The model to free */
-	void obj_destroy_model(struct obj_model *model);
+	void objDestroyModel(struct ObjModel *model);
 
 	/** Loads a MTL material definition from a string.
 		@param data The contents of the material file
 		@param numMaterials A pointer to a integer which will be set to the number of materials
 		@return An array of materials */
-	struct mtl_material *load_mtl(const char *data, unsigned int *numMaterials);
+	struct MtlMaterial *loadMtl(const char *data, unsigned int *numMaterials);
 
 	/** Destroys a MTL material.
 		@param material The material to destroy */
-	void destroy_mtl_material(struct mtl_material material);
-
-	void obj_get_vertices(struct obj_model *model, struct obj_group *group, unsigned int *vertexCount, unsigned int *indexCount, float **vertices, unsigned int **indices);
+	void destroyMtlMaterial(struct MtlMaterial material);
 
 #ifdef __cplusplus
 }
