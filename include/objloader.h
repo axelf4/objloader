@@ -14,6 +14,8 @@ extern "C" {
 		OBJ_TRIANGULATE = 0x1,
 		/** Merge mesh parts that share the same material, effectively reducing the total number of meshes. */
 		OBJ_OPTIMIZE_MESHES = 0x2,
+		/** Flag to enable potentially destructive in-situ parsing. */
+		OBJ_IN_SITU = 0x4,
 	};
 
 	/** A MTL material definition. */
@@ -43,7 +45,8 @@ extern "C" {
 	struct ObjGroup {
 		/** The name of the group, or @c 0 if it's the same as the last group's. */
 		char *name,
-			 *material; /**< The name of this group's material, or @c 0 if it's the same as the last group's. */
+			 /** The name of this group's material, or @c 0 if it's the same as the last group's. */
+			 *material;
 		/** The next group. */
 		struct ObjGroup *next;
 		/** Array of indices. */
@@ -54,10 +57,10 @@ extern "C" {
 					 indicesCapacity,
 					 // TODO rename to indicesPerFace
 					 /** Array of the number of indices per each face. */
-					 *numIndicesFace,
+					 *indicesPerFace,
 					 /** The number of faces. */
 					 numFaces,
-					 numIndicesFaceCapacity;
+					 indicesPerFaceCapacity;
 	};
 
 	/** An OBJ model. */
@@ -74,13 +77,15 @@ extern "C" {
 		struct ObjGroup *firstGroup;
 		/** Array of filenames to material libraries, relative to the OBJ file. */
 		char **materialLibraries;
+		/** The flags used when parsing the model. */
+		int flags;
 	};
 
 	/** Loads an OBJ model.
 		@param data The data of the model file, must be null-terminated
 		@param flags Additional flags use when loading
 		@return The OBJ model */
-	struct ObjModel *objLoadModel(const char *data, int flags);
+	struct ObjModel *objLoadModel(char *data, int flags);
 
 	/** Destroys an OBJ model.
 		@param model The model to free */
@@ -90,7 +95,7 @@ extern "C" {
 		@param data The contents of the material file
 		@param numMaterials A pointer to a integer which will be set to the number of materials
 		@return An array of materials */
-	struct MtlMaterial *loadMtl(const char *data, unsigned int *numMaterials);
+	struct MtlMaterial *loadMtl(char *data, unsigned int *numMaterials, int flags);
 
 	/** Destroys a MTL material.
 		@param material The material to destroy */

@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <assert.h>
 #include <math.h>
 
 #define likely(x) __builtin_expect((x),1)
@@ -13,17 +12,17 @@
 #define ATOI_CHARACTERS "+-0123456789"
 #define ATOF_CHARACTERS ATOI_CHARACTERS "."
 
-static inline void skipSpace(const char **token) {
+static inline void skipSpace(char **token) {
 	char c;
 	while ((c = **token) == ' ' || c == '\t') ++*token;
 }
 
-static inline void skipWhitespace(const char **token) {
+static inline void skipWhitespace(char **token) {
 	char c;
 	while ((c = **token) == ' ' || c == '\n' || c == '\r' || c == '\t') ++*token;
 }
 
-static float parseFloat(const char **token) {
+static float parseFloat(char **token) {
 	skipSpace(token);
 	float f = (float) atof(*token);
 	*token += strspn(*token, ATOF_CHARACTERS);
@@ -31,23 +30,28 @@ static float parseFloat(const char **token) {
 }
 
 static unsigned fixIndex(unsigned i, unsigned size) {
-	assert(i != 0 && "Invalid vertex index.");
+	// assert(i != 0 && "Invalid vertex index.");
 	return i > 0 ? i - 1 : /* negative values = relative */ size + i;
 }
 
-static char *parseText(const char **token) {
-	const char *start = *token;
+static char *parseText(char **token, int flags) {
+	char * const start = *token;
 	char c;
 	while (!(IS_SPACE(c = **token) || IS_NEW_LINE(c) || c == '\0')) ++*token;
 	size_t len = *token - start;
-	char *buffer = malloc(len * sizeof(char) + 1); // Allocate enough memory for text
-	if (!buffer) return 0;
-	memcpy(buffer, start, len); // Copy string from line
+	char *buffer;
+	if (flags & OBJ_IN_SITU) {
+		buffer = start;
+	} else {
+		buffer = malloc(len * sizeof(char) + 1); // Allocate enough memory for text
+		if (!buffer) return 0;
+		memcpy(buffer, start, len); // Copy string from line
+	}
 	buffer[len] = '\0'; // Null-terminate string
 	return buffer;
 }
 
-static void skipWhitespaceAndComments(const char **token) {
+static void skipWhitespaceAndComments(char **token) {
 	skipWhitespace(token);
 	while (unlikely(**token == '#')) {
 		while (**token != '\0' && *++*token != '\n') ;
@@ -55,7 +59,7 @@ static void skipWhitespaceAndComments(const char **token) {
 	}
 }
 
-static int parseInt(const char **token) {
+static int parseInt(char **token) {
 	int value = 0, sign = 1;
 	switch(**token) {
 		case '-': sign = -1; // Intentional fallthrough
@@ -69,23 +73,22 @@ static int parseInt(const char **token) {
 	return sign * value;
 }
 
-static struct ObjVertexIndex parseTriplet(const char **token, unsigned vertexCount, unsigned texcoordCount, unsigned normalCount) {
+static struct ObjVertexIndex parseTriplet(char **token, unsigned vertexCount, unsigned texcoordCount, unsigned normalCount) {
 	struct ObjVertexIndex vi;
 	// Initialize to invalid values
 	vi.texcoordIndex = -1;
 	vi.normalIndex = -1;
 
 	vi.vertexIndex = fixIndex(parseInt(token), vertexCount);
-	if (**token != '/') {
-		return vi;
-	}
-	*++*token;
-	if (**token != '/') {
-		vi.texcoordIndex = fixIndex(parseInt(token), texcoordCount);
-	}
 	if (**token == '/') {
 		*++*token;
-		vi.normalIndex = fixIndex(parseInt(token), normalCount);
+		if (**token != '/') {
+			vi.texcoordIndex = fixIndex(parseInt(token), texcoordCount);
+		}
+		if (**token == '/') {
+			*++*token;
+			vi.normalIndex = fixIndex(parseInt(token), normalCount);
+		}
 	}
 	return vi;
 }
@@ -99,32 +102,32 @@ static struct ObjGroup *createGroup(char *name) {
 	group->numFaces = 0;
 	group->indicesSize = 0;
 	group->indicesCapacity = 0;
-	group->numIndicesFaceCapacity = 0;
+	group->indicesPerFaceCapacity = 0;
 	if (!(group->indices = malloc(sizeof(struct ObjVertexIndex) * (group->indicesCapacity = 2)))) {
 		free(group);
 	}
-	if (!(group->numIndicesFace = malloc(sizeof(unsigned) * (group->numIndicesFaceCapacity = 2)))) {
+	if (!(group->indicesPerFace = malloc(sizeof(unsigned) * (group->indicesPerFaceCapacity = 2)))) {
 		free(group->indices);
 		free(group);
 	}
 	return group;
 }
 
-struct ObjModel *objLoadModel(const char *data, int flags) {
-	assert(data && "Input string must be non-null.");
+struct ObjModel *objLoadModel(char *data, int flags) {
 	struct ObjModel *model = calloc(1, sizeof(struct ObjModel));
 	if (!model) return 0;
+	model->flags = flags;
 	unsigned int verticesCapacity = 3, uvsCapacity = 2, normalsCapacity = 3;
 	if(!(model->vertices = malloc(sizeof(float) * verticesCapacity))) goto error;
 	if(!(model->texcoords = malloc(sizeof(float) * uvsCapacity))) goto error;
 	if(!(model->normals = malloc(sizeof(float) * normalsCapacity))) goto error;
 
-	const char *currentGroupName = 0; // The name of the current group
+	char *currentGroupName = 0; // The name of the current group
 	struct ObjGroup *currentGroup;
 	if(!(currentGroup = createGroup(0))) goto error;
 	model->firstGroup = currentGroup;
 
-	const char *token = data;
+	char *token = data;
 	while ('\0' != *token) {
 		skipWhitespaceAndComments(&token);
 		if ('v' == *token) {
@@ -170,16 +173,16 @@ struct ObjModel *objLoadModel(const char *data, int flags) {
 				skipSpace(&token);
 			} while (!IS_NEW_LINE(*token));
 
-			if (currentGroup->numFaces + 1 > currentGroup->numIndicesFaceCapacity) {
-				unsigned *tmp = realloc(currentGroup->numIndicesFace, sizeof(unsigned) * (currentGroup->numIndicesFaceCapacity *= 2));
+			if (currentGroup->numFaces + 1 > currentGroup->indicesPerFaceCapacity) {
+				unsigned *tmp = realloc(currentGroup->indicesPerFace, sizeof(unsigned) * (currentGroup->indicesPerFaceCapacity *= 2));
 				if (!tmp) goto error;
-				currentGroup->numIndicesFace = tmp;
+				currentGroup->indicesPerFace = tmp;
 			}
-			currentGroup->numIndicesFace[currentGroup->numFaces++] = numIndices;
+			currentGroup->indicesPerFace[currentGroup->numFaces++] = numIndices;
 		} else if ('g' == *token) {
 			token += 2; // Skip the 2 chars in "g "
 			skipWhitespace(&token);
-			char *groupName = parseText(&token);
+			char *groupName = parseText(&token, flags);
 			if (!groupName) goto error;
 			if (currentGroup->numFaces == 0) {
 				// If the last group is empty, just overwrite the name
@@ -194,7 +197,7 @@ struct ObjModel *objLoadModel(const char *data, int flags) {
 			}
 		} else if (0 == strncmp("usemtl", token, strlen("usemtl"))) {
 			token += 7; // Skip the 7 chars in "usemtl "
-			char *material = parseText(&token); // Parse the name of the material
+			char *material = parseText(&token, flags); // Parse the name of the material
 			if (!material) goto error;
 
 			int existingGroup = 0;
@@ -225,7 +228,7 @@ struct ObjModel *objLoadModel(const char *data, int flags) {
 		} else if (0 == strncmp("mtllib", token, strlen("mtllib"))) {
 			// TODO load multiple mtllibs as per definition: mtllib filename1 filename2 . . .
 			token += 7; // Skip the 7 chars in "mtllib "
-			char *filename = parseText(&token);
+			char *filename = parseText(&token, flags);
 			if (!filename) goto error;
 			char **tmp = realloc(model->materialLibraries, sizeof(char *) * (++model->numMaterialLibraries));
 			if (!tmp) {
@@ -248,7 +251,7 @@ error:
 		free(group->name);
 		free(group->material);
 		free(group->indices);
-		free(group->numIndicesFace);
+		free(group->indicesPerFace);
 		free(group);
 		group = next;
 	}
@@ -267,7 +270,7 @@ void objDestroyModel(struct ObjModel *model) {
 		free(group->name);
 		free(group->material);
 		free(group->indices);
-		free(group->numIndicesFace);
+		free(group->indicesPerFace);
 		free(group);
 		group = next;
 	} while (group);
@@ -282,12 +285,12 @@ void objDestroyModel(struct ObjModel *model) {
 }
 
 // TODO
-struct MtlMaterial *loadMtl(const char *data, unsigned int *numMaterials) {
+struct MtlMaterial *loadMtl(char *data, unsigned int *numMaterials, int flags) {
 	unsigned int size = 0, capacity = 2;
 	struct MtlMaterial *materials = malloc(capacity * sizeof(struct MtlMaterial)), *current; // Current material from last newmtl
 	if (!materials) return 0;
 
-	const char *token = data;
+	char *token = data;
 	for (;;) {
 		if (strncmp("newmtl", token, strlen("newmtl")) == 0) {
 			token += 7; // Skip the 7 characters in "newmtl "
@@ -300,7 +303,7 @@ struct MtlMaterial *loadMtl(const char *data, unsigned int *numMaterials) {
 				materials = tmp;
 			}
 			current = materials + size++;
-			current->name = parseText(&token);
+			current->name = parseText(&token, flags);
 			// TODO define defaults for rest
 			current->opacity = 1.f;
 			current->ambientTexture = 0;
@@ -318,7 +321,7 @@ struct MtlMaterial *loadMtl(const char *data, unsigned int *numMaterials) {
 			current->shininess = parseFloat(&token);
 		} else if (strncmp("map_Kd", token, strlen("map_Kd")) == 0) {
 			token += 7; // Skip the 7 characters "map_Kd "
-			current->ambientTexture = parseText(&token);
+			current->ambientTexture = parseText(&token, flags);
 			token += 0;
 		} else if (*token == ' ' || *token == '\n' || *token == '\t' || *token == 'r') {
 			token++; // Skip spaces or empty lines at beginning of line
