@@ -121,6 +121,7 @@ struct ObjModel *objLoadModel(char *data, int flags) {
 	if(!(model->vertices = malloc(sizeof(float) * verticesCapacity))) goto error;
 	if(!(model->texcoords = malloc(sizeof(float) * uvsCapacity))) goto error;
 	if(!(model->normals = malloc(sizeof(float) * normalsCapacity))) goto error;
+	const int triangulate = flags & OBJ_TRIANGULATE;
 
 	char *currentGroupName = 0; // The name of the current group
 	struct ObjGroup *currentGroup;
@@ -160,25 +161,36 @@ struct ObjModel *objLoadModel(char *data, int flags) {
 			token += 2; // Skip the characters 'f '
 			skipSpace(&token);
 
-			unsigned numIndices = 0;
-			do {
-				struct ObjVertexIndex vi = parseTriplet(&token, model->vertexCount, model->uvCount, model->normalCount);
-				if (currentGroup->indicesSize + 1 > currentGroup->indicesCapacity) {
+			for (unsigned int i = 0;;) {
+				if (currentGroup->indicesSize + 3 > currentGroup->indicesCapacity) {
 					struct ObjVertexIndex *tmp = realloc(currentGroup->indices, sizeof(struct ObjVertexIndex) * (currentGroup->indicesCapacity *= 2));
 					if (!tmp) goto error;
 					currentGroup->indices = tmp;
 				}
-				currentGroup->indices[currentGroup->indicesSize++] = vi;
-				++numIndices;
-				skipSpace(&token);
-			} while (!IS_NEW_LINE(*token));
 
-			if (currentGroup->numFaces + 1 > currentGroup->indicesPerFaceCapacity) {
-				unsigned *tmp = realloc(currentGroup->indicesPerFace, sizeof(unsigned) * (currentGroup->indicesPerFaceCapacity *= 2));
-				if (!tmp) goto error;
-				currentGroup->indicesPerFace = tmp;
+				if (triangulate && i >= 3) {
+					// Create a triangle fan
+					struct ObjVertexIndex first = currentGroup->indices[currentGroup->indicesSize - i], second = currentGroup->indices[currentGroup->indicesSize - 1];
+					currentGroup->indices[currentGroup->indicesSize++] = first;
+					currentGroup->indices[currentGroup->indicesSize++] = second;
+					i += 2;
+				}
+
+				// Parse a triplet
+				currentGroup->indices[currentGroup->indicesSize++] = parseTriplet(&token, model->vertexCount, model->uvCount, model->normalCount);
+				++i;
+
+				skipSpace(&token);
+				if (IS_NEW_LINE(*token) || triangulate && i % 3 == 0) {
+					if (currentGroup->numFaces + 1 > currentGroup->indicesPerFaceCapacity) {
+						unsigned *tmp = realloc(currentGroup->indicesPerFace, sizeof(unsigned) * (currentGroup->indicesPerFaceCapacity *= 2));
+						if (!tmp) goto error;
+						currentGroup->indicesPerFace = tmp;
+					}
+					currentGroup->indicesPerFace[currentGroup->numFaces++] = triangulate ? 3 : i;
+					if (IS_NEW_LINE(*token)) break;
+				}
 			}
-			currentGroup->indicesPerFace[currentGroup->numFaces++] = numIndices;
 		} else if ('g' == *token) {
 			token += 2; // Skip the 2 chars in "g "
 			skipWhitespace(&token);

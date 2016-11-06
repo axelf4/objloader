@@ -10,11 +10,14 @@ extern "C" {
 #endif
 
 	enum {
-		/** Flag to triangulate all shapes. */
+		/**
+		 * Flag to triangulate all shapes.
+		 * Faces are assumed to be coplanar and convex.
+		 */
 		OBJ_TRIANGULATE = 0x1,
 		/** Merge mesh parts that share the same material, effectively reducing the total number of meshes. */
 		OBJ_OPTIMIZE_MESHES = 0x2,
-		/** Flag to enable potentially destructive in-situ parsing. */
+		/** Flag to enable potentially destructive in-situ string parsing. */
 		OBJ_IN_SITU = 0x4,
 	};
 
