@@ -1,8 +1,7 @@
 #include "objloader.h"
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
-#include <math.h>
+#include <stdio.h>
 
 #define likely(x) __builtin_expect((x),1)
 #define unlikely(x) __builtin_expect((x),0)
@@ -22,43 +21,6 @@ static inline void skipWhitespace(char **token) {
 	while ((c = **token) == ' ' || c == '\n' || c == '\r' || c == '\t') ++*token;
 }
 
-static float parseFloat(char **token) {
-	skipSpace(token);
-	float f = (float) atof(*token);
-	*token += strspn(*token, ATOF_CHARACTERS);
-	return f;
-}
-
-static unsigned fixIndex(unsigned i, unsigned size) {
-	// assert(i != 0 && "Invalid vertex index.");
-	return i > 0 ? i - 1 : /* negative values = relative */ size + i;
-}
-
-static char *parseText(char **token, int flags) {
-	char * const start = *token;
-	char c;
-	while (!(IS_SPACE(c = **token) || IS_NEW_LINE(c) || c == '\0')) ++*token;
-	size_t len = *token - start;
-	char *buffer;
-	if (flags & OBJ_IN_SITU) {
-		buffer = start;
-	} else {
-		buffer = malloc(len * sizeof(char) + 1); // Allocate enough memory for text
-		if (!buffer) return 0;
-		memcpy(buffer, start, len); // Copy string from line
-	}
-	buffer[len] = '\0'; // Null-terminate string
-	return buffer;
-}
-
-static void skipWhitespaceAndComments(char **token) {
-	skipWhitespace(token);
-	while (unlikely(**token == '#')) {
-		while (**token != '\0' && *++*token != '\n') ;
-		skipWhitespace(token);
-	}
-}
-
 static int parseInt(char **token) {
 	int value = 0, sign = 1;
 	switch(**token) {
@@ -73,20 +35,54 @@ static int parseInt(char **token) {
 	return sign * value;
 }
 
+static float parseFloat(char **token) {
+	skipSpace(token);
+	float f = (float) atof(*token);
+	*token += strspn(*token, ATOF_CHARACTERS);
+	return f;
+}
+
+static char *parseText(char **token, int flags) {
+	char *buffer, * const start = *token, c;
+	while (!(IS_SPACE(c = **token) || IS_NEW_LINE(c) || c == '\0')) ++*token;
+	size_t len = *token - start;
+	if (flags & OBJ_IN_SITU) {
+		buffer = start;
+		++*token; // Skip the null terminator
+	} else {
+		buffer = malloc(len * sizeof(char) + 1); // Allocate enough memory for text
+		if (!buffer) return 0;
+		memcpy(buffer, start, len); // Copy string from line
+	}
+	buffer[len] = '\0'; // Null-terminate string
+	return buffer;
+}
+
+static void skipWhitespaceAndComments(char **token) {
+	skipWhitespace(token);
+	while (unlikely(**token == '#')) {
+		while (**token != '\0' && **token != '\n') ++*token;
+		skipWhitespace(token);
+	}
+}
+
+static unsigned fixIndex(unsigned i, unsigned size) {
+	return i > 0 ? /* 1-based */ i - 1 : /* negative values = relative */ size + i;
+}
+
 static struct ObjVertexIndex parseTriplet(char **token, unsigned vertexCount, unsigned texcoordCount, unsigned normalCount) {
 	struct ObjVertexIndex vi;
+	vi.vertexIndex = fixIndex(parseInt(token), vertexCount);
 	// Initialize to invalid values
 	vi.texcoordIndex = -1;
 	vi.normalIndex = -1;
-
-	vi.vertexIndex = fixIndex(parseInt(token), vertexCount);
 	if (**token == '/') {
-		*++*token;
+		++*token;
 		if (**token != '/') {
 			vi.texcoordIndex = fixIndex(parseInt(token), texcoordCount);
 		}
 		if (**token == '/') {
-			*++*token;
+			++*token;
 			vi.normalIndex = fixIndex(parseInt(token), normalCount);
 		}
 	}
@@ -102,11 +98,11 @@ static struct ObjGroup *createGroup(char *name) {
 	group->numFaces = 0;
 	group->indicesSize = 0;
 	group->indicesCapacity = 0;
-	group->indicesPerFaceCapacity = 0;
+	group->verticesPerFaceCapacity = 0;
 	if (!(group->indices = malloc(sizeof(struct ObjVertexIndex) * (group->indicesCapacity = 2)))) {
 		free(group);
 	}
-	if (!(group->indicesPerFace = malloc(sizeof(unsigned) * (group->indicesPerFaceCapacity = 2)))) {
+	if (!(group->verticesPerFace = malloc(sizeof(unsigned) * (group->verticesPerFaceCapacity = 2)))) {
 		free(group->indices);
 		free(group);
 	}
@@ -182,12 +178,12 @@ struct ObjModel *objLoadModel(char *data, int flags) {
 
 				skipSpace(&token);
 				if (IS_NEW_LINE(*token) || triangulate && i % 3 == 0) {
-					if (currentGroup->numFaces + 1 > currentGroup->indicesPerFaceCapacity) {
-						unsigned *tmp = realloc(currentGroup->indicesPerFace, sizeof(unsigned) * (currentGroup->indicesPerFaceCapacity *= 2));
+					if (currentGroup->numFaces + 1 > currentGroup->verticesPerFaceCapacity) {
+						unsigned *tmp = realloc(currentGroup->verticesPerFace, sizeof(unsigned) * (currentGroup->verticesPerFaceCapacity *= 2));
 						if (!tmp) goto error;
-						currentGroup->indicesPerFace = tmp;
+						currentGroup->verticesPerFace = tmp;
 					}
-					currentGroup->indicesPerFace[currentGroup->numFaces++] = triangulate ? 3 : i;
+					currentGroup->verticesPerFace[currentGroup->numFaces++] = triangulate ? 3 : i;
 					if (IS_NEW_LINE(*token)) break;
 				}
 			}
@@ -254,40 +250,26 @@ struct ObjModel *objLoadModel(char *data, int flags) {
 
 	return model;
 error:
-	free(model->vertices);
-	free(model->texcoords);
-	free(model->normals);
-	struct ObjGroup *group = model->firstGroup;
-	while (group) {
-		struct ObjGroup *next = group->next;
-		free(group->name);
-		free(group->material);
-		free(group->indices);
-		free(group->indicesPerFace);
-		free(group);
-		group = next;
-	}
-	for (unsigned int i = 0; i < model->numMaterialLibraries; ++i) {
-		free(model->materialLibraries[i]);
-	}
-	free(model->materialLibraries);
-	free(model);
+	objDestroyModel(model);
 	return 0;
 }
 
 void objDestroyModel(struct ObjModel *model) {
-	struct ObjGroup *group = model->firstGroup;
+	struct ObjGroup *group = model->firstGroup, *next;
 	do {
-		struct ObjGroup *next = group->next;
-		free(group->name);
-		free(group->material);
+		next = group->next;
+		if (!(model->flags & OBJ_IN_SITU)) {
+			free(group->name);
+			free(group->material);
+		}
 		free(group->indices);
-		free(group->indicesPerFace);
+		free(group->verticesPerFace);
 		free(group);
-		group = next;
-	} while (group);
-	for (unsigned int i = 0; i < model->numMaterialLibraries; ++i) {
-		free(model->materialLibraries[i]);
+	} while (group = next);
+	if (!(model->flags & OBJ_IN_SITU)) {
+		for (int i = 0; i < model->numMaterialLibraries; ++i) {
+			free(model->materialLibraries[i]);
+		}
 	}
 	free(model->materialLibraries);
 	free(model->vertices);

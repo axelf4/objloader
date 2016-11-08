@@ -58,12 +58,11 @@ extern "C" {
 		unsigned int indicesSize,
 					 /** The capacity of the indices array. */
 					 indicesCapacity,
-					 // TODO rename to indicesPerFace
 					 /** Array of the number of indices per each face. */
-					 *indicesPerFace,
+					 *verticesPerFace,
 					 /** The number of faces. */
 					 numFaces,
-					 indicesPerFaceCapacity;
+					 verticesPerFaceCapacity;
 	};
 
 	/** An OBJ model. */
